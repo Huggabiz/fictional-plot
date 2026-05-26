@@ -25,31 +25,77 @@ html, body, #root {
 }
 
 .app-header {
-  padding: 0.75rem 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.875rem;
   border-bottom: 1px solid #2a2a2a;
+  background: #161616;
+  z-index: 1;
 }
 
-.app-header h1 {
-  margin: 0;
-  font-size: 1.1rem;
-  font-weight: 500;
+.app-title {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
 }
 
-.app-header p {
+.app-title h1 {
   margin: 0;
-  font-size: 0.8rem;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.app-mode {
+  font-size: 0.75rem;
   color: #888;
+}
+
+.app-stats {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+  font-size: 0.78rem;
+  color: #888;
+  font-variant-numeric: tabular-nums;
+}
+
+.app-button {
+  background: #2a2a2a;
+  color: #eaeaea;
+  border: 1px solid #383838;
+  border-radius: 6px;
+  padding: 0.3rem 0.7rem;
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.app-button:hover:not(:disabled) {
+  background: #333;
+}
+
+.app-button:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .app-main {
   flex: 1;
   position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  min-height: 0;
 }
 
-.placeholder {
-  color: #555;
-  font-size: 0.9rem;
+.sketch-container {
+  position: absolute;
+  inset: 0;
+}
+
+.sketch-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #1a1a1a;
+  touch-action: none;
 }
