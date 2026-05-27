@@ -13,6 +13,7 @@ import {
 import { findPointAt, findCandidateAt } from './hitTest';
 import { nextId } from './ids';
 import { NumberPad } from './NumberPad';
+import { formatNumber, fromMm, type Units } from '../model/units';
 import type { CandidateLine } from '../survey/candidates';
 import { runSurveySolve } from '../survey/run';
 import type { Layer, FeatureTool, SurveyTool } from '../App';
@@ -27,6 +28,7 @@ interface PendingMeasurement {
 interface Props {
   plot: Plot;
   setPlot: (updater: (plot: Plot) => Plot) => void;
+  pushHistory: () => void;
   layer: Layer;
   featureTool: FeatureTool;
   surveyTool: SurveyTool;
@@ -36,6 +38,8 @@ interface Props {
   setCurrentShapeId: (id: string | null) => void;
   activePointId: string | null;
   setActivePointId: (id: string | null) => void;
+  units: Units;
+  setUnits: (u: Units) => void;
 }
 
 interface PointerSnapshot {
@@ -64,6 +68,7 @@ const CLOSE_FIRST_POINT_PX = 22;
 export function SketchCanvas({
   plot,
   setPlot,
+  pushHistory,
   layer,
   featureTool,
   surveyTool,
@@ -73,6 +78,8 @@ export function SketchCanvas({
   setCurrentShapeId,
   activePointId,
   setActivePointId,
+  units,
+  setUnits,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -159,13 +166,13 @@ export function SketchCanvas({
     } else {
       // Lattice is the visual focus on layer 2: draw thick translucent
       // racetracks first, then crisp black shape lines and points on top.
-      drawCandidates(ctx, plot, viewport, candidates, nextBestKey, measurementByKey, residuals);
+      drawCandidates(ctx, plot, viewport, candidates, nextBestKey, measurementByKey, residuals, units);
       drawShapes(ctx, plot, viewport, 1.0);
       drawPoints(ctx, plot, viewport, null, null, 1.0);
     }
   }, [
     plot, viewport, activePointId, currentShapeId, size, layer,
-    candidates, nextBestKey, measurementByKey, residuals,
+    candidates, nextBestKey, measurementByKey, residuals, units,
   ]);
 
   // --- Tool dispatchers ---
@@ -173,14 +180,17 @@ export function SketchCanvas({
   const handleFeatureTap = useCallback((worldPt: Vec2, hitPoint: Point | null) => {
     const tool = propsRef.current.featureTool;
     if (tool === 'draw') {
+      pushHistory();
       handleDrawTap(worldPt, hitPoint);
     } else if (tool === 'point') {
+      if (!hitPoint) pushHistory();
       handleAddPointTap(worldPt, hitPoint);
     } else if (tool === 'delete') {
+      if (hitPoint) pushHistory();
       handleDeleteTap(hitPoint);
     }
     // 'edit' uses drag, not tap.
-  }, []);
+  }, [pushHistory]);
 
   const handleDrawTap = useCallback((worldPt: Vec2, hitPoint: Point | null) => {
     setPlot(prev => {
@@ -255,6 +265,7 @@ export function SketchCanvas({
 
     if (tool === 'delete') {
       if (!existingId) return;
+      pushHistory();
       setPlot(prev => removeMeasurement(prev, existingId));
       return;
     }
@@ -267,12 +278,13 @@ export function SketchCanvas({
       existingId,
       existingLength: existing ? existing.length : null,
     });
-  }, []);
+  }, [pushHistory]);
 
   const commitPendingMeasurement = useCallback((value: number) => {
     const pending = pendingMeasurement;
     if (!pending) return;
     setPendingMeasurement(null);
+    pushHistory();
     setPlot(prev => {
       const measurements = { ...prev.measurements };
       if (pending.existingId) {
@@ -291,15 +303,16 @@ export function SketchCanvas({
       const withMeasurement: Plot = { ...prev, measurements };
       return runSurveySolve(withMeasurement) ?? withMeasurement;
     });
-  }, [pendingMeasurement, setPlot]);
+  }, [pendingMeasurement, setPlot, pushHistory]);
 
   const deletePendingMeasurement = useCallback(() => {
     const pending = pendingMeasurement;
     if (!pending || !pending.existingId) return;
     const existingId = pending.existingId;
     setPendingMeasurement(null);
+    pushHistory();
     setPlot(prev => removeMeasurement(prev, existingId));
-  }, [pendingMeasurement, setPlot]);
+  }, [pendingMeasurement, setPlot, pushHistory]);
 
   // --- Pointer pipeline ---
 
@@ -338,9 +351,10 @@ export function SketchCanvas({
     const worldPt = screenToWorld(vp, screen);
     const hit = findPointAt(propsRef.current.plot, worldPt, POINT_HIT_RADIUS_PX / vp.scale);
     if (!hit) return false;
+    pushHistory();
     gestureRef.current = { kind: 'drag', id: pointerId, pointId: hit.id, startScreen: screen };
     return true;
-  }, []);
+  }, [pushHistory]);
 
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const screen = clientToCanvas(e, canvasRef.current);
@@ -448,14 +462,12 @@ export function SketchCanvas({
           title={pendingMeasurement.existingId ? 'Update dimension' : 'Enter dimension'}
           subtitle={
             pendingMeasurement.existingLength != null
-              ? `Currently ${formatLength(pendingMeasurement.existingLength)}`
-              : `Sketch length ~${formatLength(pendingMeasurement.worldLength)}`
+              ? `Currently ${formatNumber(fromMm(pendingMeasurement.existingLength, units), units)} ${units}`
+              : `Sketch length ~${formatNumber(fromMm(pendingMeasurement.worldLength, units), units)} ${units}`
           }
-          initialValue={
-            pendingMeasurement.existingLength != null
-              ? String(pendingMeasurement.existingLength)
-              : ''
-          }
+          initialValueMm={pendingMeasurement.existingLength ?? undefined}
+          unit={units}
+          onUnitChange={setUnits}
           allowDelete={pendingMeasurement.existingId != null}
           onCommit={commitPendingMeasurement}
           onDelete={deletePendingMeasurement}
@@ -505,7 +517,12 @@ function removePoint(plot: Plot, id: string): Plot {
   const anchor = plot.anchorPointId === id ? undefined : plot.anchorPointId;
   const orient = plot.orientationPointId === id ? undefined : plot.orientationPointId;
 
-  return { points, shapes, measurements, anchorPointId: anchor, orientationPointId: orient };
+  return {
+    points, shapes, measurements,
+    anchorPointId: anchor,
+    orientationPointId: orient,
+    units: plot.units,
+  };
 }
 
 function removeMeasurement(plot: Plot, id: string): Plot {
@@ -590,6 +607,7 @@ function drawCandidates(
   nextBestKey: string | null,
   measurementByKey: Map<string, Measurement>,
   residuals: Map<string, number>,
+  units: Units,
 ) {
   ctx.save();
   ctx.lineCap = 'round';
@@ -646,7 +664,7 @@ function drawCandidates(
     // Dimension label.
     ctx.globalAlpha = 1;
     const mid = { x: (sa.x + sb.x) / 2, y: (sa.y + sb.y) / 2 };
-    const label = formatLength(m.length);
+    const label = `${formatNumber(fromMm(m.length, units), units)} ${units}`;
     drawLabel(ctx, mid, label);
   }
   ctx.restore();
@@ -677,12 +695,6 @@ function drawLabel(ctx: CanvasRenderingContext2D, at: Vec2, text: string) {
   ctx.textBaseline = 'middle';
   ctx.fillText(text, at.x, at.y);
   ctx.restore();
-}
-
-function formatLength(n: number): string {
-  if (n >= 100) return n.toFixed(0);
-  if (n >= 10) return n.toFixed(1);
-  return n.toFixed(2);
 }
 
 function drawPoints(

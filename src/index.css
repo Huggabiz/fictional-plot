@@ -95,6 +95,56 @@ html, body, #root {
   font-variant-numeric: tabular-nums;
 }
 
+.header-button {
+  background: #f4f6fb;
+  color: #1a1f2b;
+  border: 1px solid #d8dce6;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.4rem 0.7rem;
+  cursor: pointer;
+}
+
+.header-button:hover:not(:disabled) {
+  background: #eaeef7;
+}
+
+.header-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.unit-row {
+  display: flex;
+  background: #eef0f7;
+  border: 1px solid #d8dce6;
+  border-radius: 8px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.unit-button {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: #5a6478;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.35rem 0;
+  border-radius: 6px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.unit-button.active {
+  background: #ffffff;
+  color: #1a1f2b;
+  box-shadow: 0 1px 2px rgba(20, 30, 60, 0.1);
+}
+
 .app-body {
   flex: 1;
   display: flex;
@@ -309,16 +359,57 @@ html, body, #root {
   border: 1px solid #d8dce6;
   border-radius: 8px;
   padding: 0.75rem 1rem;
-  font-size: 1.8rem;
   font-weight: 600;
-  text-align: right;
   font-variant-numeric: tabular-nums;
   color: #1a1f2b;
   min-height: 3rem;
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 0.5rem;
 }
 
-.numpad-display.empty {
+.numpad-display-value {
+  font-size: 1.8rem;
+}
+
+.numpad-display-unit {
+  font-size: 0.95rem;
+  color: #5a6478;
+  font-weight: 500;
+}
+
+.numpad-display.empty .numpad-display-value {
   color: #a8b0c0;
+}
+
+.numpad-units {
+  display: flex;
+  background: #eef0f7;
+  border: 1px solid #d8dce6;
+  border-radius: 8px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.numpad-unit {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: #5a6478;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 0.45rem 0;
+  border-radius: 6px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.numpad-unit.active {
+  background: #ffffff;
+  color: #1a1f2b;
+  box-shadow: 0 1px 2px rgba(20, 30, 60, 0.1);
 }
 
 .numpad-grid {

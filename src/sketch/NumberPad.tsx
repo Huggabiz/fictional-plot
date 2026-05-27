@@ -1,11 +1,16 @@
 import { useEffect, useState } from 'react';
+import { ALL_UNITS, fromMm, toMm, type Units } from '../model/units';
 
 interface Props {
   title: string;
   subtitle?: string;
-  initialValue?: string;
+  /** Existing length in mm to seed the display, if editing. */
+  initialValueMm?: number;
+  unit: Units;
+  onUnitChange: (unit: Units) => void;
   allowDelete?: boolean;
-  onCommit: (value: number) => void;
+  /** Called with the entered length converted to mm. */
+  onCommit: (valueMm: number) => void;
   onDelete?: () => void;
   onCancel: () => void;
 }
@@ -13,13 +18,29 @@ interface Props {
 export function NumberPad({
   title,
   subtitle,
-  initialValue = '',
+  initialValueMm,
+  unit,
+  onUnitChange,
   allowDelete = false,
   onCommit,
   onDelete,
   onCancel,
 }: Props) {
-  const [value, setValue] = useState(initialValue);
+  const [value, setValue] = useState(() =>
+    initialValueMm != null ? formatInitial(initialValueMm, unit) : '',
+  );
+
+  // When editing an existing measurement, re-format the seeded display
+  // string each time the user toggles units so the same underlying mm
+  // value is shown in the new unit. When entering fresh, the digits the
+  // user has typed are left alone — they're now interpreted in the new
+  // unit, which is what a tape-readout swap should do.
+  useEffect(() => {
+    if (initialValueMm != null) {
+      setValue(formatInitial(initialValueMm, unit));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unit]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -44,7 +65,7 @@ export function NumberPad({
   const tryCommit = (raw: string) => {
     const n = Number(raw);
     if (!Number.isFinite(n) || n <= 0) return;
-    onCommit(n);
+    onCommit(toMm(n, unit));
   };
 
   const numeric = Number(value);
@@ -61,8 +82,23 @@ export function NumberPad({
           <div className="numpad-title">{title}</div>
           {subtitle ? <div className="numpad-subtitle">{subtitle}</div> : null}
         </div>
+        <div className="numpad-units" role="tablist" aria-label="Units">
+          {ALL_UNITS.map(u => (
+            <button
+              key={u}
+              type="button"
+              role="tab"
+              aria-selected={u === unit}
+              className={`numpad-unit ${u === unit ? 'active' : ''}`}
+              onClick={() => onUnitChange(u)}
+            >
+              {u}
+            </button>
+          ))}
+        </div>
         <div className={`numpad-display ${value === '' ? 'empty' : ''}`}>
-          {value === '' ? '0' : value}
+          <span className="numpad-display-value">{value === '' ? '0' : value}</span>
+          <span className="numpad-display-unit">{unit}</span>
         </div>
         <div className="numpad-grid">
           <button type="button" className="numpad-key" onClick={() => press('7')}>7</button>
@@ -104,7 +140,12 @@ function appendDigit(current: string, key: string): string {
     if (current === '') return '0.';
     return current + '.';
   }
-  // Strip leading-zero like "0" → digit, but keep "0." intact.
   if (current === '0') return key;
   return current + key;
+}
+
+function formatInitial(valueMm: number, unit: Units): string {
+  const v = fromMm(valueMm, unit);
+  // Trim trailing zeros for nicer editing.
+  return String(Number(v.toFixed(6)));
 }
