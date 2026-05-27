@@ -1,6 +1,7 @@
 import type { Vec2 } from '../physics/types';
 import type { Plot, Point } from '../model/plot';
-import { distance } from '../physics/math/vec2';
+import { distance, distToSegment } from '../physics/math/vec2';
+import type { CandidateLine } from '../survey/candidates';
 
 export function findPointAt(plot: Plot, worldPt: Vec2, hitRadius: number): Point | null {
   let best: Point | null = null;
@@ -15,14 +16,23 @@ export function findPointAt(plot: Plot, worldPt: Vec2, hitRadius: number): Point
   return best;
 }
 
-export function edgeKey(a: string, b: string): string {
-  return a < b ? `${a}|${b}` : `${b}|${a}`;
-}
-
-export function hasEdgeBetween(plot: Plot, a: string, b: string): boolean {
-  const key = edgeKey(a, b);
-  for (const e of Object.values(plot.edges)) {
-    if (edgeKey(e.pointIds[0], e.pointIds[1]) === key) return true;
+export function findCandidateAt(
+  plot: Plot,
+  candidates: CandidateLine[],
+  worldPt: Vec2,
+  hitRadius: number,
+): CandidateLine | null {
+  let best: CandidateLine | null = null;
+  let bestD = hitRadius;
+  for (const c of candidates) {
+    const a = plot.points[c.pointIds[0]];
+    const b = plot.points[c.pointIds[1]];
+    if (!a || !b) continue;
+    const d = distToSegment(worldPt, a.position, b.position);
+    if (d <= bestD) {
+      best = c;
+      bestD = d;
+    }
   }
-  return false;
+  return best;
 }
