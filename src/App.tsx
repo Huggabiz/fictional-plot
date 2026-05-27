@@ -171,6 +171,14 @@ export function App() {
           >
             ↶ Undo
           </button>
+          <button
+            type="button"
+            className="header-button"
+            onClick={clearAll}
+            title="Start a new plot (clears the canvas)"
+          >
+            New
+          </button>
           <button type="button" className="header-button" onClick={openFile} title="Open a .fplot.json file">
             Open
           </button>
