@@ -3,6 +3,7 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches:
+      - claude/vibrant-johnson-UQKTG
       - main
   workflow_dispatch:
 
