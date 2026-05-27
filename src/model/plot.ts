@@ -61,6 +61,23 @@ export interface Measurement {
   weight?: number;
 }
 
+/**
+ * Optional reference image traced behind the rough plot. The image is
+ * positioned in world coordinates by its centre, rotated by `rotation`
+ * (radians, clockwise like screen y-axis), and uniformly scaled.
+ * `dataUrl` keeps the bitmap embedded in the plot so saves are
+ * self-contained.
+ */
+export interface Underlay {
+  dataUrl: string;
+  naturalWidth: number;
+  naturalHeight: number;
+  center: Vec2;
+  rotation: number;
+  scale: number;
+  opacity: number;
+}
+
 export interface Plot {
   points: Record<string, Point>;
   shapes: Record<string, Shape>;
@@ -76,6 +93,8 @@ export interface Plot {
    *  shape. Default is small but non-zero so basic drawings retain
    *  their look even with sparse measurements. */
   shapeCohesion: number;
+  /** Reference image traced behind the plot, if any. */
+  underlay?: Underlay;
 }
 
 export const emptyPlot = (): Plot => ({

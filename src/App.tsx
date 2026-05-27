@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { type Plot, type Shape, emptyPlot } from './model/plot';
+import { type Plot, type Shape, type Underlay, emptyPlot } from './model/plot';
 import { ALL_UNITS, type Units } from './model/units';
 import { loadPlot, savePlot } from './model/persist';
 import { downloadPlot, pickPlotFile } from './model/io';
+import { pickUnderlay } from './model/imageImport';
 import { SketchCanvas } from './sketch/SketchCanvas';
 import {
   bestNextCandidate,
@@ -11,7 +12,7 @@ import {
 import { runSurveySolve } from './survey/run';
 
 export type Layer = 'features' | 'survey';
-export type FeatureTool = 'draw' | 'point' | 'onEdge' | 'edit' | 'delete';
+export type FeatureTool = 'draw' | 'point' | 'onEdge' | 'edit' | 'delete' | 'adjustImage';
 export type SurveyTool = 'measure' | 'delete';
 
 const HISTORY_LIMIT = 50;
@@ -90,6 +91,46 @@ export function App() {
   const saveFile = useCallback(() => {
     downloadPlot(plotRef.current);
   }, []);
+
+  const importImage = useCallback(async () => {
+    // Aim for the image to span ~600 mm initially — large enough to
+    // see but small enough not to dominate the viewport. The user
+    // can then drag/pinch to place it precisely.
+    const underlay = await pickUnderlay(600, { x: 0, y: 0 });
+    if (!underlay) return;
+    pushHistory();
+    setPlot(p => ({ ...p, underlay }));
+    setFeatureTool('adjustImage');
+    setLayer('features');
+  }, [pushHistory]);
+
+  const setUnderlay = useCallback((updater: (u: Underlay) => Underlay) => {
+    setPlot(prev => {
+      if (!prev.underlay) return prev;
+      return { ...prev, underlay: updater(prev.underlay) };
+    });
+  }, []);
+
+  const removeUnderlay = useCallback(() => {
+    pushHistory();
+    setPlot(prev => {
+      if (!prev.underlay) return prev;
+      const { underlay: _, ...rest } = prev;
+      return rest;
+    });
+    setFeatureTool(t => (t === 'adjustImage' ? 'draw' : t));
+  }, [pushHistory]);
+
+  const resetUnderlayTransform = useCallback(() => {
+    pushHistory();
+    setPlot(prev => {
+      if (!prev.underlay) return prev;
+      return {
+        ...prev,
+        underlay: { ...prev.underlay, rotation: 0, center: { x: 0, y: 0 } },
+      };
+    });
+  }, [pushHistory]);
 
   const candidates = useMemo(() => computeCandidates(plot), [plot]);
   const nextBest = useMemo(() => bestNextCandidate(candidates), [candidates]);
@@ -185,6 +226,14 @@ export function App() {
           <button type="button" className="header-button" onClick={saveFile} title="Download as .fplot.json">
             Save
           </button>
+          <button
+            type="button"
+            className="header-button"
+            onClick={importImage}
+            title="Import an image to trace over"
+          >
+            Image…
+          </button>
         </div>
       </header>
 
@@ -207,6 +256,11 @@ export function App() {
               }}
               onFinishShape={finishCurrentShape}
               onClearAll={clearAll}
+              underlay={plot.underlay}
+              onUnderlayChange={setUnderlay}
+              onRemoveUnderlay={removeUnderlay}
+              onResetUnderlay={resetUnderlayTransform}
+              onImportImage={importImage}
             />
           ) : (
             <SurveySidebar
@@ -243,6 +297,7 @@ export function App() {
             setActivePointId={setActivePointId}
             units={plot.units}
             setUnits={setUnits}
+            onUnderlayChange={setUnderlay}
           />
         </main>
       </div>
@@ -258,6 +313,11 @@ function FeatureSidebar({
   onPickShape,
   onFinishShape,
   onClearAll,
+  underlay,
+  onUnderlayChange,
+  onRemoveUnderlay,
+  onResetUnderlay,
+  onImportImage,
 }: {
   tool: FeatureTool;
   onTool: (t: FeatureTool) => void;
@@ -266,6 +326,11 @@ function FeatureSidebar({
   onPickShape: (id: string) => void;
   onFinishShape: () => void;
   onClearAll: () => void;
+  underlay: Underlay | undefined;
+  onUnderlayChange: (u: (cur: Underlay) => Underlay) => void;
+  onRemoveUnderlay: () => void;
+  onResetUnderlay: () => void;
+  onImportImage: () => void;
 }) {
   return (
     <>
@@ -286,12 +351,74 @@ function FeatureSidebar({
         <ToolButton active={tool === 'delete'} onClick={() => onTool('delete')} hint="Tap a point to remove it.">
           Delete
         </ToolButton>
+        {underlay ? (
+          <ToolButton
+            active={tool === 'adjustImage'}
+            onClick={() => onTool('adjustImage')}
+            hint="Drag to move the image; pinch with two fingers to scale and rotate."
+          >
+            Adjust image
+          </ToolButton>
+        ) : null}
       </div>
       {tool === 'draw' ? (
         <button type="button" className="block-button" disabled={!currentShapeId} onClick={onFinishShape}>
           Finish shape
         </button>
       ) : null}
+
+      <SectionTitle>Reference image</SectionTitle>
+      {underlay ? (
+        <>
+          <div className="slider-row">
+            <label className="slider-label">Opacity</label>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={underlay.opacity}
+              onChange={e => {
+                const v = Number(e.currentTarget.value);
+                onUnderlayChange(u => ({ ...u, opacity: v }));
+              }}
+            />
+            <span className="slider-value">{Math.round(underlay.opacity * 100)}%</span>
+          </div>
+          <div className="slider-row">
+            <label className="slider-label">Rotation</label>
+            <input
+              type="range"
+              min={-180}
+              max={180}
+              step={0.5}
+              value={(underlay.rotation * 180) / Math.PI}
+              onChange={e => {
+                const deg = Number(e.currentTarget.value);
+                onUnderlayChange(u => ({ ...u, rotation: (deg * Math.PI) / 180 }));
+              }}
+            />
+            <span className="slider-value">{Math.round((underlay.rotation * 180) / Math.PI)}°</span>
+          </div>
+          <button type="button" className="block-button" onClick={onResetUnderlay}>
+            Reset rotation & position
+          </button>
+          <button type="button" className="block-button danger" onClick={onRemoveUnderlay}>
+            Remove image
+          </button>
+          <p className="hint">
+            Pick the Adjust image tool to drag/scale/rotate on the canvas. Tap any other
+            tool to draw over the image as a tracing underlay.
+          </p>
+        </>
+      ) : (
+        <>
+          <button type="button" className="block-button" onClick={onImportImage}>
+            Import image…
+          </button>
+          <p className="hint">JPG, PNG or anything the browser can decode. Embedded into the saved plot.</p>
+        </>
+      )}
 
       <SectionTitle>Shapes ({shapes.length})</SectionTitle>
       {shapes.length === 0 ? (

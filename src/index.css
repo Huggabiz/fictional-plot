@@ -132,11 +132,17 @@ html, body, #root {
   accent-color: #3b5bdb;
 }
 
+.slider-label {
+  font-size: 0.74rem;
+  color: #5a6478;
+  width: 4.5em;
+}
+
 .slider-value {
   font-size: 0.78rem;
   color: #5a6478;
   font-variant-numeric: tabular-nums;
-  min-width: 2.5ch;
+  min-width: 3ch;
   text-align: right;
 }
 

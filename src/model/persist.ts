@@ -1,4 +1,4 @@
-import { emptyPlot, type Plot, type Point } from './plot';
+import { emptyPlot, type Plot, type Point, type Underlay } from './plot';
 import { ALL_UNITS, type Units } from './units';
 
 const KEY = 'fictional-plot:v1';
@@ -58,5 +58,23 @@ export function normalisePlot(parsed: Partial<Plot>): Plot {
     orientationPointId: parsed.orientationPointId,
     units,
     shapeCohesion,
+    underlay: normaliseUnderlay(parsed.underlay),
+  };
+}
+
+function normaliseUnderlay(u: Partial<Underlay> | undefined): Underlay | undefined {
+  if (!u || typeof u.dataUrl !== 'string') return undefined;
+  return {
+    dataUrl: u.dataUrl,
+    naturalWidth: typeof u.naturalWidth === 'number' ? u.naturalWidth : 0,
+    naturalHeight: typeof u.naturalHeight === 'number' ? u.naturalHeight : 0,
+    center: u.center && typeof u.center.x === 'number' && typeof u.center.y === 'number'
+      ? { x: u.center.x, y: u.center.y }
+      : { x: 0, y: 0 },
+    rotation: typeof u.rotation === 'number' ? u.rotation : 0,
+    scale: typeof u.scale === 'number' && u.scale > 0 ? u.scale : 1,
+    opacity: typeof u.opacity === 'number'
+      ? Math.max(0, Math.min(1, u.opacity))
+      : 0.6,
   };
 }

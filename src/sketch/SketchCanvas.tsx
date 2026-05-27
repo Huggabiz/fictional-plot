@@ -14,7 +14,7 @@ import { findPointAt, findCandidateAt, findShapeEdgeAt, type ShapeEdgeHit } from
 import { nextId } from './ids';
 import { NumberPad } from './NumberPad';
 import { formatNumber, fromMm, type Units } from '../model/units';
-import { effectivePosition } from '../model/plot';
+import { effectivePosition, type Underlay } from '../model/plot';
 import type { CandidateLine } from '../survey/candidates';
 import { runSurveySolve } from '../survey/run';
 import type { Layer, FeatureTool, SurveyTool } from '../App';
@@ -41,6 +41,7 @@ interface Props {
   setActivePointId: (id: string | null) => void;
   units: Units;
   setUnits: (u: Units) => void;
+  onUnderlayChange: (updater: (u: Underlay) => Underlay) => void;
 }
 
 interface PointerSnapshot {
@@ -59,6 +60,18 @@ type Gesture =
       startDist: number;
       startViewport: Viewport;
       startMidScreen: Vec2;
+    }
+  | { kind: 'imagePan'; id: number; lastScreen: Vec2 }
+  | {
+      kind: 'imagePinch';
+      idA: number;
+      idB: number;
+      startDist: number;
+      startAngle: number;
+      startCenter: Vec2;
+      startScale: number;
+      startRotation: number;
+      pivotWorld: Vec2;
     };
 
 const TAP_THRESHOLD_PX = 6;
@@ -81,6 +94,7 @@ export function SketchCanvas({
   setActivePointId,
   units,
   setUnits,
+  onUnderlayChange,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -92,6 +106,28 @@ export function SketchCanvas({
   const gestureRef = useRef<Gesture>({ kind: 'idle' });
   const viewportRef = useRef(viewport);
   viewportRef.current = viewport;
+
+  // Cache the decoded underlay image so we're not re-decoding every
+  // frame. Re-decode only when the dataUrl changes (i.e. the user
+  // imports a new image).
+  const underlayImgRef = useRef<{ dataUrl: string; img: HTMLImageElement; ready: boolean } | null>(null);
+  const [imgReady, setImgReady] = useState(0);
+  useEffect(() => {
+    const u = plot.underlay;
+    if (!u) {
+      underlayImgRef.current = null;
+      return;
+    }
+    if (underlayImgRef.current?.dataUrl === u.dataUrl) return;
+    const img = new Image();
+    const entry = { dataUrl: u.dataUrl, img, ready: false };
+    underlayImgRef.current = entry;
+    img.onload = () => {
+      entry.ready = true;
+      setImgReady(x => x + 1);
+    };
+    img.src = u.dataUrl;
+  }, [plot.underlay]);
 
   // Keep current refs for use in pointer handlers.
   const propsRef = useRef({
@@ -163,9 +199,16 @@ export function SketchCanvas({
 
     drawGrid(ctx, viewport, size);
 
+    if (plot.underlay && underlayImgRef.current?.ready && underlayImgRef.current.dataUrl === plot.underlay.dataUrl) {
+      drawUnderlay(ctx, plot.underlay, underlayImgRef.current.img, viewport);
+    }
+
     if (layer === 'features') {
       drawShapes(ctx, plot, viewport, 1.0);
       drawPoints(ctx, plot, viewport, activePointId, currentShapeId, 1.0);
+      if (featureTool === 'adjustImage' && plot.underlay) {
+        drawUnderlayHandles(ctx, plot.underlay, viewport);
+      }
     } else {
       // Lattice is the visual focus on layer 2: draw thick translucent
       // racetracks first, then crisp black shape lines and points on top.
@@ -174,8 +217,8 @@ export function SketchCanvas({
       drawPoints(ctx, plot, viewport, null, null, 1.0);
     }
   }, [
-    plot, viewport, activePointId, currentShapeId, size, layer,
-    candidates, nextBestKey, measurementByKey, residuals, units,
+    plot, viewport, activePointId, currentShapeId, size, layer, featureTool,
+    candidates, nextBestKey, measurementByKey, residuals, units, imgReady,
   ]);
 
   // --- Tool dispatchers ---
@@ -421,6 +464,12 @@ export function SketchCanvas({
     return true;
   }, [pushHistory]);
 
+  const isImageMode = (): boolean => {
+    return propsRef.current.layer === 'features'
+      && propsRef.current.featureTool === 'adjustImage'
+      && !!propsRef.current.plot.underlay;
+  };
+
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const screen = clientToCanvas(e, canvasRef.current);
     pointersRef.current.set(e.pointerId, { screen });
@@ -432,12 +481,28 @@ export function SketchCanvas({
       const [a, b] = [...pointersRef.current.entries()];
       const dist = vDist(a[1].screen, b[1].screen);
       const mid = vMid(a[1].screen, b[1].screen);
-      gestureRef.current = {
-        kind: 'pinch', idA: a[0], idB: b[0],
-        startDist: Math.max(dist, 1),
-        startViewport: viewportRef.current,
-        startMidScreen: mid,
-      };
+      if (isImageMode()) {
+        const u = propsRef.current.plot.underlay!;
+        pushHistory();
+        const angle = Math.atan2(b[1].screen.y - a[1].screen.y, b[1].screen.x - a[1].screen.x);
+        gestureRef.current = {
+          kind: 'imagePinch',
+          idA: a[0], idB: b[0],
+          startDist: Math.max(dist, 1),
+          startAngle: angle,
+          startCenter: { x: u.center.x, y: u.center.y },
+          startScale: u.scale,
+          startRotation: u.rotation,
+          pivotWorld: screenToWorld(viewportRef.current, mid),
+        };
+      } else {
+        gestureRef.current = {
+          kind: 'pinch', idA: a[0], idB: b[0],
+          startDist: Math.max(dist, 1),
+          startViewport: viewportRef.current,
+          startMidScreen: mid,
+        };
+      }
     }
   };
 
@@ -451,7 +516,10 @@ export function SketchCanvas({
       const dx = screen.x - g.startScreen.x;
       const dy = screen.y - g.startScreen.y;
       if (Math.hypot(dx, dy) > TAP_THRESHOLD_PX) {
-        if (!tryStartDrag(e.pointerId, g.startScreen)) {
+        if (isImageMode()) {
+          pushHistory();
+          gestureRef.current = { kind: 'imagePan', id: e.pointerId, lastScreen: g.startScreen };
+        } else if (!tryStartDrag(e.pointerId, g.startScreen)) {
           gestureRef.current = { kind: 'pan', id: e.pointerId, lastScreen: g.startScreen };
         }
       }
@@ -490,6 +558,34 @@ export function SketchCanvas({
       const panX = mid.x - g2.startMidScreen.x;
       const panY = mid.y - g2.startMidScreen.y;
       setViewport({ ...zoomed, tx: zoomed.tx + panX, ty: zoomed.ty + panY });
+    } else if (g2.kind === 'imagePan' && g2.id === e.pointerId) {
+      const vp = viewportRef.current;
+      const dx = (screen.x - g2.lastScreen.x) / vp.scale;
+      const dy = (screen.y - g2.lastScreen.y) / vp.scale;
+      onUnderlayChange(u => ({ ...u, center: { x: u.center.x + dx, y: u.center.y + dy } }));
+      gestureRef.current = { ...g2, lastScreen: screen };
+    } else if (g2.kind === 'imagePinch') {
+      const a = pointersRef.current.get(g2.idA);
+      const b = pointersRef.current.get(g2.idB);
+      if (!a || !b) return;
+      const dist = Math.max(vDist(a.screen, b.screen), 1);
+      const angle = Math.atan2(b.screen.y - a.screen.y, b.screen.x - a.screen.x);
+      const factor = dist / g2.startDist;
+      const dRot = angle - g2.startAngle;
+      const cos = Math.cos(dRot);
+      const sin = Math.sin(dRot);
+      // Rotate and scale the starting centre around the world pivot.
+      const ox = g2.startCenter.x - g2.pivotWorld.x;
+      const oy = g2.startCenter.y - g2.pivotWorld.y;
+      const rx = (cos * ox - sin * oy) * factor;
+      const ry = (sin * ox + cos * oy) * factor;
+      const newCenter = { x: g2.pivotWorld.x + rx, y: g2.pivotWorld.y + ry };
+      onUnderlayChange(u => ({
+        ...u,
+        scale: g2.startScale * factor,
+        rotation: g2.startRotation + dRot,
+        center: newCenter,
+      }));
     }
   };
 
@@ -507,13 +603,19 @@ export function SketchCanvas({
       gestureRef.current = { kind: 'idle' };
     } else if (pointersRef.current.size === 1) {
       const [[id, snap]] = [...pointersRef.current.entries()];
-      gestureRef.current = { kind: 'pan', id, lastScreen: snap.screen };
+      gestureRef.current = isImageMode()
+        ? { kind: 'imagePan', id, lastScreen: snap.screen }
+        : { kind: 'pan', id, lastScreen: snap.screen };
     }
   };
 
   const onWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
     const screen = clientToCanvas(e, canvasRef.current);
     const factor = Math.exp(-e.deltaY * 0.0015);
+    if (isImageMode()) {
+      onUnderlayChange(u => ({ ...u, scale: u.scale * factor }));
+      return;
+    }
     setViewport(v => zoomAt(v, screen, factor));
   };
 
@@ -647,6 +749,63 @@ function drawGrid(ctx: CanvasRenderingContext2D, vp: Viewport, size: { w: number
     ctx.lineTo(size.w, y);
   }
   ctx.stroke();
+}
+
+function drawUnderlay(
+  ctx: CanvasRenderingContext2D,
+  u: Underlay,
+  img: HTMLImageElement,
+  vp: Viewport,
+) {
+  if (u.naturalWidth === 0 || u.naturalHeight === 0) return;
+  // Compose: screen ← world ← image local. screen = vp.scale·world + vp.t.
+  // World transform of image: translate(center) · rotate · scale.
+  // We draw centred at origin in image-local coords, so:
+  //   ctx.translate(screenCenter); rotate; scale(vp.scale * u.scale);
+  //   drawImage(img, -w/2, -h/2)
+  ctx.save();
+  ctx.globalAlpha = Math.max(0, Math.min(1, u.opacity));
+  const sx = vp.tx + u.center.x * vp.scale;
+  const sy = vp.ty + u.center.y * vp.scale;
+  ctx.translate(sx, sy);
+  ctx.rotate(u.rotation);
+  const k = vp.scale * u.scale;
+  ctx.scale(k, k);
+  ctx.drawImage(img, -u.naturalWidth / 2, -u.naturalHeight / 2);
+  ctx.restore();
+}
+
+function drawUnderlayHandles(
+  ctx: CanvasRenderingContext2D,
+  u: Underlay,
+  vp: Viewport,
+) {
+  if (u.naturalWidth === 0 || u.naturalHeight === 0) return;
+  ctx.save();
+  const sx = vp.tx + u.center.x * vp.scale;
+  const sy = vp.ty + u.center.y * vp.scale;
+  ctx.translate(sx, sy);
+  ctx.rotate(u.rotation);
+  const k = vp.scale * u.scale;
+  const w = u.naturalWidth * k;
+  const h = u.naturalHeight * k;
+  ctx.strokeStyle = '#3b5bdb';
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([6, 4]);
+  ctx.strokeRect(-w / 2, -h / 2, w, h);
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#3b5bdb';
+  ctx.beginPath();
+  ctx.arc(0, 0, 4, 0, Math.PI * 2);
+  ctx.fill();
+  // Up-indicator: a short tick pointing toward -y so the image's
+  // current orientation is visible at a glance.
+  ctx.beginPath();
+  ctx.moveTo(0, -h / 2);
+  ctx.lineTo(0, -h / 2 - 14);
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.restore();
 }
 
 function drawShapes(ctx: CanvasRenderingContext2D, plot: Plot, vp: Viewport, alpha: number) {
