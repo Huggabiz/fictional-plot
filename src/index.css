@@ -1,8 +1,8 @@
 :root {
-  color-scheme: dark;
+  color-scheme: light;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background: #1a1a1a;
-  color: #eaeaea;
+  background: #f6f7fb;
+  color: #1a1f2b;
 }
 
 * { box-sizing: border-box; }
@@ -29,9 +29,15 @@ html, body, #root {
   align-items: center;
   gap: 1rem;
   padding: 0.5rem 0.875rem;
-  border-bottom: 1px solid #2a2a2a;
-  background: #161616;
+  border-bottom: 1px solid #d8dce6;
+  background: #ffffff;
   z-index: 1;
+}
+
+.app-title {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
 }
 
 .app-title h1 {
@@ -39,12 +45,25 @@ html, body, #root {
   font-size: 1rem;
   font-weight: 600;
   letter-spacing: 0.01em;
+  color: #1a1f2b;
+}
+
+.app-version {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #5a6478;
+  background: #eef0f7;
+  border: 1px solid #d8dce6;
+  border-radius: 4px;
+  padding: 0.1rem 0.4rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
 }
 
 .layer-tabs {
   display: flex;
-  background: #0e0e0e;
-  border: 1px solid #2a2a2a;
+  background: #eef0f7;
+  border: 1px solid #d8dce6;
   border-radius: 8px;
   padding: 2px;
 }
@@ -52,7 +71,7 @@ html, body, #root {
 .layer-tab {
   background: transparent;
   border: none;
-  color: #888;
+  color: #5a6478;
   font: inherit;
   font-size: 0.78rem;
   padding: 0.35rem 0.75rem;
@@ -61,8 +80,9 @@ html, body, #root {
 }
 
 .layer-tab.active {
-  background: #2a2a2a;
-  color: #eaeaea;
+  background: #ffffff;
+  color: #1a1f2b;
+  box-shadow: 0 1px 2px rgba(20, 30, 60, 0.1);
 }
 
 .app-stats {
@@ -71,7 +91,7 @@ html, body, #root {
   align-items: center;
   gap: 0.875rem;
   font-size: 0.78rem;
-  color: #888;
+  color: #5a6478;
   font-variant-numeric: tabular-nums;
 }
 
@@ -85,8 +105,8 @@ html, body, #root {
   width: 240px;
   flex-shrink: 0;
   padding: 0.75rem 0.875rem;
-  background: #141414;
-  border-right: 1px solid #2a2a2a;
+  background: #ffffff;
+  border-right: 1px solid #d8dce6;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -98,7 +118,7 @@ html, body, #root {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #777;
+  color: #7a8398;
   margin: 0.75rem 0 0.25rem 0;
 }
 
@@ -114,9 +134,9 @@ html, body, #root {
 
 .tool-button,
 .block-button {
-  background: #222;
-  color: #eaeaea;
-  border: 1px solid #303030;
+  background: #f4f6fb;
+  color: #1a1f2b;
+  border: 1px solid #d8dce6;
   border-radius: 6px;
   padding: 0.5rem 0.4rem;
   font: inherit;
@@ -127,13 +147,13 @@ html, body, #root {
 
 .tool-button:hover,
 .block-button:hover:not(:disabled) {
-  background: #2d2d2d;
+  background: #eaeef7;
 }
 
 .tool-button.active {
-  background: #2a3550;
-  border-color: #4a6aaf;
-  color: #eaf0ff;
+  background: #dde6ff;
+  border-color: #5b7fd9;
+  color: #1f3380;
 }
 
 .block-button {
@@ -142,18 +162,18 @@ html, body, #root {
 }
 
 .block-button:disabled {
-  opacity: 0.45;
+  opacity: 0.5;
   cursor: default;
 }
 
 .block-button.danger {
   background: transparent;
-  border-color: #4a2a2a;
-  color: #d77575;
+  border-color: #e3b3b3;
+  color: #b54040;
 }
 
 .block-button.danger:hover:not(:disabled) {
-  background: #2a1818;
+  background: #fbeaea;
 }
 
 .shape-list {
@@ -170,9 +190,9 @@ html, body, #root {
   justify-content: space-between;
   align-items: center;
   width: 100%;
-  background: #1c1c1c;
-  border: 1px solid #2a2a2a;
-  color: #cfcfcf;
+  background: #f4f6fb;
+  border: 1px solid #d8dce6;
+  color: #2a3144;
   border-radius: 6px;
   padding: 0.4rem 0.55rem;
   font: inherit;
@@ -181,17 +201,17 @@ html, body, #root {
 }
 
 .shape-row:hover {
-  background: #232323;
+  background: #eaeef7;
 }
 
 .shape-row.active {
-  border-color: #4a6aaf;
-  background: #1f2740;
-  color: #eaf0ff;
+  border-color: #5b7fd9;
+  background: #dde6ff;
+  color: #1f3380;
 }
 
 .shape-name { font-weight: 500; }
-.shape-meta { color: #888; font-size: 0.72rem; }
+.shape-meta { color: #7a8398; font-size: 0.72rem; }
 
 .stat-list {
   list-style: none;
@@ -201,17 +221,17 @@ html, body, #root {
   flex-direction: column;
   gap: 0.25rem;
   font-size: 0.8rem;
-  color: #c0c0c0;
+  color: #3a4458;
 }
 
 .stat-list strong {
-  color: #eaeaea;
+  color: #1a1f2b;
   font-variant-numeric: tabular-nums;
 }
 
 .hint {
   margin: 0.5rem 0 0 0;
-  color: #888;
+  color: #5a6478;
   font-size: 0.75rem;
   line-height: 1.4;
 }
@@ -236,8 +256,140 @@ html, body, #root {
   display: block;
   width: 100%;
   height: 100%;
-  background: #1a1a1a;
+  background: #f6f7fb;
   touch-action: none;
+}
+
+/* Number pad modal */
+
+.numpad-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(20, 28, 50, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  padding: 1rem;
+}
+
+.numpad {
+  background: #ffffff;
+  border: 1px solid #d8dce6;
+  border-radius: 14px;
+  box-shadow: 0 12px 32px rgba(20, 30, 60, 0.18);
+  padding: 1rem;
+  width: min(360px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.numpad-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.numpad-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #5a6478;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.numpad-subtitle {
+  font-size: 0.78rem;
+  color: #7a8398;
+}
+
+.numpad-display {
+  background: #f4f6fb;
+  border: 1px solid #d8dce6;
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  font-size: 1.8rem;
+  font-weight: 600;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: #1a1f2b;
+  min-height: 3rem;
+}
+
+.numpad-display.empty {
+  color: #a8b0c0;
+}
+
+.numpad-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.numpad-key {
+  background: #f4f6fb;
+  border: 1px solid #d8dce6;
+  border-radius: 10px;
+  font: inherit;
+  font-size: 1.4rem;
+  font-weight: 500;
+  color: #1a1f2b;
+  padding: 1rem 0;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+}
+
+.numpad-key:active {
+  background: #dde6ff;
+  border-color: #5b7fd9;
+}
+
+.numpad-key.wide {
+  grid-column: span 2;
+}
+
+.numpad-key.muted {
+  color: #5a6478;
+  font-size: 1rem;
+}
+
+.numpad-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.numpad-action {
+  flex: 1;
+  background: #f4f6fb;
+  border: 1px solid #d8dce6;
+  border-radius: 10px;
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #1a1f2b;
+  padding: 0.85rem 0;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.numpad-action.primary {
+  background: #3b5bdb;
+  border-color: #3b5bdb;
+  color: #ffffff;
+}
+
+.numpad-action.primary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.numpad-action.danger {
+  background: transparent;
+  border-color: #e3b3b3;
+  color: #b54040;
 }
 
 @media (max-width: 720px) {

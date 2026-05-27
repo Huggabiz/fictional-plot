@@ -62,6 +62,7 @@ export function App() {
       <header className="app-header">
         <div className="app-title">
           <h1>Fictional Plot</h1>
+          <span className="app-version" title="Build version">{__APP_VERSION__}</span>
         </div>
         <div className="layer-tabs" role="tablist" aria-label="Layer">
           <button
@@ -269,9 +270,10 @@ function SurveySidebar({
       </button>
 
       <p className="hint">
-        Grey lines are Delaunay candidates. The <span style={{ color: '#7aa2ff' }}>blue</span> line
-        is the next best one to measure. Measured lines glow{' '}
-        <span style={{ color: '#5cd6a0' }}>green</span> when in-fit, <span style={{ color: '#ff6c6c' }}>red</span> when stressed.
+        Translucent grey racetracks are candidate dimensions; the{' '}
+        <span style={{ color: '#3b5bdb', fontWeight: 600 }}>blue</span> one is the next best to measure.
+        Measured lines glow <span style={{ color: '#2e8b57', fontWeight: 600 }}>green</span> when in-fit,{' '}
+        <span style={{ color: '#c83c3c', fontWeight: 600 }}>red</span> when stressed.
       </p>
     </>
   );

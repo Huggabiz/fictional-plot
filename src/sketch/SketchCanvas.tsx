@@ -12,9 +12,17 @@ import {
 } from './viewport';
 import { findPointAt, findCandidateAt } from './hitTest';
 import { nextId } from './ids';
+import { NumberPad } from './NumberPad';
 import type { CandidateLine } from '../survey/candidates';
 import { runSurveySolve } from '../survey/run';
 import type { Layer, FeatureTool, SurveyTool } from '../App';
+
+interface PendingMeasurement {
+  pointIds: [string, string];
+  worldLength: number;
+  existingId: string | null;
+  existingLength: number | null;
+}
 
 interface Props {
   plot: Plot;
@@ -70,6 +78,7 @@ export function SketchCanvas({
   const containerRef = useRef<HTMLDivElement>(null);
   const [viewport, setViewport] = useState<Viewport>(initialViewport);
   const [size, setSize] = useState({ w: 0, h: 0 });
+  const [pendingMeasurement, setPendingMeasurement] = useState<PendingMeasurement | null>(null);
 
   const pointersRef = useRef(new Map<number, PointerSnapshot>());
   const gestureRef = useRef<Gesture>({ kind: 'idle' });
@@ -148,9 +157,11 @@ export function SketchCanvas({
       drawShapes(ctx, plot, viewport, 1.0);
       drawPoints(ctx, plot, viewport, activePointId, currentShapeId, 1.0);
     } else {
-      drawShapes(ctx, plot, viewport, 0.35);
+      // Lattice is the visual focus on layer 2: draw thick translucent
+      // racetracks first, then crisp black shape lines and points on top.
       drawCandidates(ctx, plot, viewport, candidates, nextBestKey, measurementByKey, residuals);
-      drawPoints(ctx, plot, viewport, null, null, 0.7);
+      drawShapes(ctx, plot, viewport, 1.0);
+      drawPoints(ctx, plot, viewport, null, null, 1.0);
     }
   }, [
     plot, viewport, activePointId, currentShapeId, size, layer,
@@ -248,34 +259,31 @@ export function SketchCanvas({
       return;
     }
 
-    // tool === 'measure'
+    // tool === 'measure' — open the on-screen number pad.
     const existing = existingId ? curPlot.measurements[existingId] : null;
-    const suggested = existing ? existing.length : Number(hit.worldLength.toFixed(2));
-    const input = window.prompt(
-      existing
-        ? `Update tape reading (current ${existing.length}):`
-        : `Tape reading between these points:`,
-      String(suggested),
-    );
-    if (input == null) return;
-    const trimmed = input.trim();
-    if (trimmed === '') {
-      if (existingId) setPlot(prev => removeMeasurement(prev, existingId));
-      return;
-    }
-    const value = Number(trimmed);
-    if (!Number.isFinite(value) || value <= 0) {
-      alert('Enter a positive number.');
-      return;
-    }
+    setPendingMeasurement({
+      pointIds: [hit.pointIds[0], hit.pointIds[1]],
+      worldLength: hit.worldLength,
+      existingId,
+      existingLength: existing ? existing.length : null,
+    });
+  }, []);
+
+  const commitPendingMeasurement = useCallback((value: number) => {
+    const pending = pendingMeasurement;
+    if (!pending) return;
+    setPendingMeasurement(null);
     setPlot(prev => {
       const measurements = { ...prev.measurements };
-      if (existingId) {
-        measurements[existingId] = { ...measurements[existingId], length: value };
+      if (pending.existingId) {
+        measurements[pending.existingId] = {
+          ...measurements[pending.existingId],
+          length: value,
+        };
       } else {
         const m: Measurement = {
           id: nextId('meas'),
-          pointIds: [hit.pointIds[0], hit.pointIds[1]],
+          pointIds: pending.pointIds,
           length: value,
         };
         measurements[m.id] = m;
@@ -283,7 +291,15 @@ export function SketchCanvas({
       const withMeasurement: Plot = { ...prev, measurements };
       return runSurveySolve(withMeasurement) ?? withMeasurement;
     });
-  }, [setPlot]);
+  }, [pendingMeasurement, setPlot]);
+
+  const deletePendingMeasurement = useCallback(() => {
+    const pending = pendingMeasurement;
+    if (!pending || !pending.existingId) return;
+    const existingId = pending.existingId;
+    setPendingMeasurement(null);
+    setPlot(prev => removeMeasurement(prev, existingId));
+  }, [pendingMeasurement, setPlot]);
 
   // --- Pointer pipeline ---
 
@@ -427,6 +443,25 @@ export function SketchCanvas({
         onPointerCancel={endPointer}
         onWheel={onWheel}
       />
+      {pendingMeasurement ? (
+        <NumberPad
+          title={pendingMeasurement.existingId ? 'Update dimension' : 'Enter dimension'}
+          subtitle={
+            pendingMeasurement.existingLength != null
+              ? `Currently ${formatLength(pendingMeasurement.existingLength)}`
+              : `Sketch length ~${formatLength(pendingMeasurement.worldLength)}`
+          }
+          initialValue={
+            pendingMeasurement.existingLength != null
+              ? String(pendingMeasurement.existingLength)
+              : ''
+          }
+          allowDelete={pendingMeasurement.existingId != null}
+          onCommit={commitPendingMeasurement}
+          onDelete={deletePendingMeasurement}
+          onCancel={() => setPendingMeasurement(null)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -491,7 +526,7 @@ function drawGrid(ctx: CanvasRenderingContext2D, vp: Viewport, size: { w: number
   const screenStep = step * vp.scale;
   const offX = ((vp.tx % screenStep) + screenStep) % screenStep;
   const offY = ((vp.ty % screenStep) + screenStep) % screenStep;
-  ctx.strokeStyle = '#222';
+  ctx.strokeStyle = '#e3e6ee';
   ctx.lineWidth = 1;
   ctx.beginPath();
   for (let x = offX; x < size.w; x += screenStep) {
@@ -508,13 +543,13 @@ function drawGrid(ctx: CanvasRenderingContext2D, vp: Viewport, size: { w: number
 function drawShapes(ctx: CanvasRenderingContext2D, plot: Plot, vp: Viewport, alpha: number) {
   ctx.save();
   ctx.globalAlpha = alpha;
-  ctx.lineWidth = 2;
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
+  ctx.lineWidth = 1.5;
+  ctx.lineCap = 'butt';
+  ctx.lineJoin = 'miter';
   for (const s of Object.values(plot.shapes)) {
     if (s.pointIds.length < 2) continue;
     const segs = shapeSegments(s);
-    ctx.strokeStyle = s.closed ? '#9bb6ff' : '#7aa2ff';
+    ctx.strokeStyle = '#0d1117';
     ctx.beginPath();
     for (const [aId, bId] of segs) {
       const a = plot.points[aId];
@@ -527,7 +562,7 @@ function drawShapes(ctx: CanvasRenderingContext2D, plot: Plot, vp: Viewport, alp
     }
     ctx.stroke();
     if (s.closed) {
-      ctx.fillStyle = 'rgba(122, 162, 255, 0.06)';
+      ctx.fillStyle = 'rgba(13, 17, 23, 0.04)';
       ctx.beginPath();
       const first = plot.points[s.pointIds[0]];
       if (first) {
@@ -558,8 +593,9 @@ function drawCandidates(
 ) {
   ctx.save();
   ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
 
-  // Pass 1: unmeasured candidates (grey or blue).
+  // Pass 1: unmeasured candidates — thick translucent racetracks.
   for (const c of candidates) {
     if (c.measured) continue;
     const a = plot.points[c.pointIds[0]];
@@ -568,13 +604,17 @@ function drawCandidates(
     const sa = worldToScreen(vp, a.position);
     const sb = worldToScreen(vp, b.position);
     if (c.key === nextBestKey) {
-      ctx.strokeStyle = '#7aa2ff';
-      ctx.lineWidth = 6;
-      ctx.globalAlpha = 0.95;
+      ctx.strokeStyle = '#3b5bdb';
+      ctx.lineWidth = 18;
+      ctx.globalAlpha = 0.42;
+    } else if (c.improvesRigidity) {
+      ctx.strokeStyle = '#7a8398';
+      ctx.lineWidth = 16;
+      ctx.globalAlpha = 0.22;
     } else {
-      ctx.strokeStyle = c.improvesRigidity ? '#4a4a4a' : '#3a3a3a';
-      ctx.lineWidth = 5;
-      ctx.globalAlpha = c.improvesRigidity ? 0.65 : 0.35;
+      ctx.strokeStyle = '#7a8398';
+      ctx.lineWidth = 14;
+      ctx.globalAlpha = 0.12;
     }
     ctx.beginPath();
     ctx.moveTo(sa.x, sa.y);
@@ -582,8 +622,7 @@ function drawCandidates(
     ctx.stroke();
   }
 
-  // Pass 2: measured candidates (stress-coloured) + dimension label.
-  ctx.globalAlpha = 1;
+  // Pass 2: measured candidates — stress-coloured racetracks + dimension label.
   for (const c of candidates) {
     if (!c.measured) continue;
     const a = plot.points[c.pointIds[0]];
@@ -597,13 +636,15 @@ function drawCandidates(
     const tol = Math.max(m.length * 0.01, 1); // 1 % of length, min 1 unit
     const stress = Math.min(1, Math.abs(r) / (tol * 5));
     ctx.strokeStyle = stressColour(stress);
-    ctx.lineWidth = 4;
+    ctx.lineWidth = 16;
+    ctx.globalAlpha = 0.55;
     ctx.beginPath();
     ctx.moveTo(sa.x, sa.y);
     ctx.lineTo(sb.x, sb.y);
     ctx.stroke();
 
     // Dimension label.
+    ctx.globalAlpha = 1;
     const mid = { x: (sa.x + sb.x) / 2, y: (sa.y + sb.y) / 2 };
     const label = formatLength(m.length);
     drawLabel(ctx, mid, label);
@@ -613,25 +654,25 @@ function drawCandidates(
 
 function stressColour(stress: number): string {
   // 0 → green, 1 → red.
-  const r = Math.round(92 + (255 - 92) * stress);
-  const g = Math.round(214 + (108 - 214) * stress);
-  const b = Math.round(160 + (108 - 160) * stress);
+  const r = Math.round(60 + (200 - 60) * stress);
+  const g = Math.round(170 + (60 - 170) * stress);
+  const b = Math.round(110 + (60 - 110) * stress);
   return `rgb(${r}, ${g}, ${b})`;
 }
 
 function drawLabel(ctx: CanvasRenderingContext2D, at: Vec2, text: string) {
   ctx.save();
-  ctx.font = '600 11px -apple-system, system-ui, sans-serif';
+  ctx.font = '600 12px -apple-system, system-ui, sans-serif';
   const metrics = ctx.measureText(text);
-  const pad = 4;
+  const pad = 5;
   const w = metrics.width + pad * 2;
-  const h = 16;
-  ctx.fillStyle = 'rgba(20, 20, 20, 0.9)';
+  const h = 18;
+  ctx.fillStyle = '#ffffff';
   ctx.fillRect(at.x - w / 2, at.y - h / 2, w, h);
-  ctx.strokeStyle = '#3a3a3a';
+  ctx.strokeStyle = '#d8dce6';
   ctx.lineWidth = 1;
   ctx.strokeRect(at.x - w / 2, at.y - h / 2, w, h);
-  ctx.fillStyle = '#eaeaea';
+  ctx.fillStyle = '#1a1f2b';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(text, at.x, at.y);
@@ -667,22 +708,22 @@ function drawPoints(
     if (isActive) {
       ctx.beginPath();
       ctx.arc(s.x, s.y, 12, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(122, 162, 255, 0.18)';
+      ctx.fillStyle = 'rgba(59, 91, 219, 0.18)';
       ctx.fill();
     }
     if (isCloseTarget) {
       ctx.beginPath();
       ctx.arc(s.x, s.y, 14, 0, Math.PI * 2);
-      ctx.strokeStyle = 'rgba(154, 196, 255, 0.5)';
+      ctx.strokeStyle = 'rgba(59, 91, 219, 0.5)';
       ctx.lineWidth = 1.5;
       ctx.stroke();
     }
     ctx.beginPath();
     ctx.arc(s.x, s.y, 5, 0, Math.PI * 2);
-    ctx.fillStyle = isActive ? '#7aa2ff' : '#eaeaea';
+    ctx.fillStyle = isActive ? '#3b5bdb' : '#ffffff';
     ctx.fill();
     ctx.lineWidth = 1.5;
-    ctx.strokeStyle = '#1a1a1a';
+    ctx.strokeStyle = '#0d1117';
     ctx.stroke();
   }
   ctx.restore();
