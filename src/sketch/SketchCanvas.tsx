@@ -10,10 +10,11 @@ import {
   zoomAt,
   type Viewport,
 } from './viewport';
-import { findPointAt, findCandidateAt } from './hitTest';
+import { findPointAt, findCandidateAt, findShapeEdgeAt, type ShapeEdgeHit } from './hitTest';
 import { nextId } from './ids';
 import { NumberPad } from './NumberPad';
 import { formatNumber, fromMm, type Units } from '../model/units';
+import { effectivePosition } from '../model/plot';
 import type { CandidateLine } from '../survey/candidates';
 import { runSurveySolve } from '../survey/run';
 import type { Layer, FeatureTool, SurveyTool } from '../App';
@@ -129,7 +130,9 @@ export function SketchCanvas({
       const a = plot.points[m.pointIds[0]];
       const b = plot.points[m.pointIds[1]];
       if (!a || !b) continue;
-      const cur = Math.hypot(a.position.x - b.position.x, a.position.y - b.position.y);
+      const pa = effectivePosition(a, plot.points);
+      const pb = effectivePosition(b, plot.points);
+      const cur = Math.hypot(pa.x - pb.x, pa.y - pb.y);
       out.set(m.id, cur - m.length);
     }
     return out;
@@ -177,14 +180,21 @@ export function SketchCanvas({
 
   // --- Tool dispatchers ---
 
-  const handleFeatureTap = useCallback((worldPt: Vec2, hitPoint: Point | null) => {
+  const handleFeatureTap = useCallback((
+    worldPt: Vec2,
+    hitPoint: Point | null,
+    edgeHit: ShapeEdgeHit | null,
+  ) => {
     const tool = propsRef.current.featureTool;
     if (tool === 'draw') {
       pushHistory();
-      handleDrawTap(worldPt, hitPoint);
+      handleDrawTap(worldPt, hitPoint, edgeHit);
     } else if (tool === 'point') {
       if (!hitPoint) pushHistory();
       handleAddPointTap(worldPt, hitPoint);
+    } else if (tool === 'onEdge') {
+      if (edgeHit) pushHistory();
+      handleOnEdgeTap(edgeHit);
     } else if (tool === 'delete') {
       if (hitPoint) pushHistory();
       handleDeleteTap(hitPoint);
@@ -192,7 +202,11 @@ export function SketchCanvas({
     // 'edit' uses drag, not tap.
   }, [pushHistory]);
 
-  const handleDrawTap = useCallback((worldPt: Vec2, hitPoint: Point | null) => {
+  const handleDrawTap = useCallback((
+    worldPt: Vec2,
+    hitPoint: Point | null,
+    edgeHit: ShapeEdgeHit | null,
+  ) => {
     setPlot(prev => {
       const curShapeId = propsRef.current.currentShapeId;
       const curShape = curShapeId ? prev.shapes[curShapeId] : null;
@@ -227,8 +241,29 @@ export function SketchCanvas({
         return { ...prev, shapes: { ...prev.shapes, [shape.id]: shape } };
       }
 
+      // Tap on an existing edge (and not currently extending a shape):
+      // insert a new vertex into that shape, splitting the edge.
+      if (edgeHit && !curShape) {
+        const target = prev.shapes[edgeHit.shapeId];
+        if (target) {
+          const point: Point = newFreePointAt(edgeHit.pointOnEdge, prev, edgeHit);
+          const insertAt = edgeHit.segmentIndex + 1;
+          const newIds = target.pointIds.slice();
+          // For a closed-shape closing segment, segmentIndex === len - 1
+          // and we want to insert at the end (just before wrapping).
+          newIds.splice(insertAt, 0, point.id);
+          const updatedShape: Shape = { ...target, pointIds: newIds };
+          setActivePointId(point.id);
+          return {
+            ...prev,
+            points: { ...prev.points, [point.id]: point },
+            shapes: { ...prev.shapes, [updatedShape.id]: updatedShape },
+          };
+        }
+      }
+
       // Tap empty: create a new point.
-      const point: Point = { id: nextId('pt'), position: worldPt };
+      const point: Point = newFreePointAt(worldPt, prev, null);
       const points = { ...prev.points, [point.id]: point };
       if (curShape && !curShape.closed) {
         const extended: Shape = { ...curShape, pointIds: [...curShape.pointIds, point.id] };
@@ -245,10 +280,35 @@ export function SketchCanvas({
   const handleAddPointTap = useCallback((worldPt: Vec2, hitPoint: Point | null) => {
     if (hitPoint) return;
     setPlot(prev => {
-      const point: Point = { id: nextId('pt'), position: worldPt };
+      const point = newFreePointAt(worldPt, prev, null);
       return { ...prev, points: { ...prev.points, [point.id]: point } };
     });
   }, [setPlot]);
+
+  const handleOnEdgeTap = useCallback((edgeHit: ShapeEdgeHit | null) => {
+    if (!edgeHit) return;
+    setPlot(prev => {
+      const a = prev.points[edgeHit.pointAId];
+      const b = prev.points[edgeHit.pointBId];
+      if (!a || !b) return prev;
+      const t = edgeHit.t;
+      const pos = { x: a.position.x * (1 - t) + b.position.x * t, y: a.position.y * (1 - t) + b.position.y * t };
+      const sketchPos = {
+        x: a.sketchPosition.x * (1 - t) + b.sketchPosition.x * t,
+        y: a.sketchPosition.y * (1 - t) + b.sketchPosition.y * t,
+      };
+      const point: Point = {
+        id: nextId('pt'),
+        position: pos,
+        sketchPosition: sketchPos,
+        kind: 'onEdge',
+        parents: [edgeHit.pointAId, edgeHit.pointBId],
+        t,
+      };
+      setActivePointId(point.id);
+      return { ...prev, points: { ...prev.points, [point.id]: point } };
+    });
+  }, [setPlot, setActivePointId]);
 
   const handleDeleteTap = useCallback((hitPoint: Point | null) => {
     if (!hitPoint) return;
@@ -319,10 +379,9 @@ export function SketchCanvas({
   const performTap = useCallback((screenPt: Vec2) => {
     const vp = viewportRef.current;
     const worldPt = screenToWorld(vp, screenPt);
-    const { layer: curLayer, plot: curPlot, currentShapeId: curShapeId } = propsRef.current;
+    const { layer: curLayer, featureTool: tool, plot: curPlot, currentShapeId: curShapeId } = propsRef.current;
     if (curLayer === 'features') {
       const hitR = POINT_HIT_RADIUS_PX / vp.scale;
-      // Tighter close-shape radius via the standard hit radius works fine.
       const hit = findPointAt(curPlot, worldPt, hitR);
       // If drawing and pointing close to the first point of an open shape, snap to it for closing.
       if (!hit && curShapeId) {
@@ -333,13 +392,18 @@ export function SketchCanvas({
             const dx = first.position.x - worldPt.x;
             const dy = first.position.y - worldPt.y;
             if (Math.hypot(dx, dy) <= CLOSE_FIRST_POINT_PX / vp.scale) {
-              handleFeatureTap(worldPt, first);
+              handleFeatureTap(worldPt, first, null);
               return;
             }
           }
         }
       }
-      handleFeatureTap(worldPt, hit);
+      // For draw / on-edge tools, also look for a shape edge under the tap.
+      let edgeHit: ShapeEdgeHit | null = null;
+      if (!hit && (tool === 'draw' || tool === 'onEdge')) {
+        edgeHit = findShapeEdgeAt(curPlot, worldPt, LINE_HIT_RADIUS_PX / vp.scale);
+      }
+      handleFeatureTap(worldPt, hit, edgeHit);
     } else {
       handleSurveyTap(worldPt);
     }
@@ -351,6 +415,7 @@ export function SketchCanvas({
     const worldPt = screenToWorld(vp, screen);
     const hit = findPointAt(propsRef.current.plot, worldPt, POINT_HIT_RADIUS_PX / vp.scale);
     if (!hit) return false;
+    if (hit.kind === 'onEdge') return false; // can't drag a constrained point
     pushHistory();
     gestureRef.current = { kind: 'drag', id: pointerId, pointId: hit.id, startScreen: screen };
     return true;
@@ -403,9 +468,15 @@ export function SketchCanvas({
       setPlot(prev => {
         const pt = prev.points[g2.pointId];
         if (!pt) return prev;
+        // Drags in feature mode update both the solved position and
+        // the sketch position so the cohesion soft constraints reflect
+        // the user's latest intent.
         return {
           ...prev,
-          points: { ...prev.points, [g2.pointId]: { ...pt, position: worldPt } },
+          points: {
+            ...prev.points,
+            [g2.pointId]: { ...pt, position: worldPt, sketchPosition: worldPt },
+          },
         };
       });
     } else if (g2.kind === 'pinch') {
@@ -497,9 +568,29 @@ function measurementIdForPair(plot: Plot, a: string, b: string): string | null {
   return null;
 }
 
+function newFreePointAt(world: Vec2, _plot: Plot, _edge: ShapeEdgeHit | null): Point {
+  return {
+    id: nextId('pt'),
+    position: { ...world },
+    sketchPosition: { ...world },
+    kind: 'free',
+  };
+}
+
 function removePoint(plot: Plot, id: string): Plot {
   const points = { ...plot.points };
   delete points[id];
+
+  // Cascade: on-edge points whose parents were deleted lose their
+  // constraint. Convert them into free points at their last known
+  // position so they don't crash the solver.
+  for (const [pid, p] of Object.entries(points)) {
+    if (p.kind !== 'onEdge' || !p.parents) continue;
+    const [aId, bId] = p.parents;
+    if (!points[aId] || !points[bId]) {
+      points[pid] = { ...p, kind: 'free', parents: undefined, t: undefined };
+    }
+  }
 
   const shapes: Record<string, Shape> = {};
   for (const s of Object.values(plot.shapes)) {
@@ -522,6 +613,7 @@ function removePoint(plot: Plot, id: string): Plot {
     anchorPointId: anchor,
     orientationPointId: orient,
     units: plot.units,
+    shapeCohesion: plot.shapeCohesion,
   };
 }
 
@@ -572,8 +664,8 @@ function drawShapes(ctx: CanvasRenderingContext2D, plot: Plot, vp: Viewport, alp
       const a = plot.points[aId];
       const b = plot.points[bId];
       if (!a || !b) continue;
-      const sa = worldToScreen(vp, a.position);
-      const sb = worldToScreen(vp, b.position);
+      const sa = worldToScreen(vp, effectivePosition(a, plot.points));
+      const sb = worldToScreen(vp, effectivePosition(b, plot.points));
       ctx.moveTo(sa.x, sa.y);
       ctx.lineTo(sb.x, sb.y);
     }
@@ -583,12 +675,12 @@ function drawShapes(ctx: CanvasRenderingContext2D, plot: Plot, vp: Viewport, alp
       ctx.beginPath();
       const first = plot.points[s.pointIds[0]];
       if (first) {
-        const sf = worldToScreen(vp, first.position);
+        const sf = worldToScreen(vp, effectivePosition(first, plot.points));
         ctx.moveTo(sf.x, sf.y);
         for (let i = 1; i < s.pointIds.length; i++) {
           const p = plot.points[s.pointIds[i]];
           if (!p) continue;
-          const sp = worldToScreen(vp, p.position);
+          const sp = worldToScreen(vp, effectivePosition(p, plot.points));
           ctx.lineTo(sp.x, sp.y);
         }
         ctx.closePath();
@@ -619,8 +711,8 @@ function drawCandidates(
     const a = plot.points[c.pointIds[0]];
     const b = plot.points[c.pointIds[1]];
     if (!a || !b) continue;
-    const sa = worldToScreen(vp, a.position);
-    const sb = worldToScreen(vp, b.position);
+    const sa = worldToScreen(vp, effectivePosition(a, plot.points));
+    const sb = worldToScreen(vp, effectivePosition(b, plot.points));
     if (c.key === nextBestKey) {
       ctx.strokeStyle = '#3b5bdb';
       ctx.lineWidth = 18;
@@ -648,8 +740,8 @@ function drawCandidates(
     if (!a || !b) continue;
     const m = measurementByKey.get(c.key);
     if (!m) continue;
-    const sa = worldToScreen(vp, a.position);
-    const sb = worldToScreen(vp, b.position);
+    const sa = worldToScreen(vp, effectivePosition(a, plot.points));
+    const sb = worldToScreen(vp, effectivePosition(b, plot.points));
     const r = residuals.get(m.id) ?? 0;
     const tol = Math.max(m.length * 0.01, 1); // 1 % of length, min 1 unit
     const stress = Math.min(1, Math.abs(r) / (tol * 5));
@@ -713,7 +805,7 @@ function drawPoints(
       ? plot.shapes[currentShapeId].pointIds[0]
       : null;
   for (const p of Object.values(plot.points)) {
-    const s = worldToScreen(vp, p.position);
+    const s = worldToScreen(vp, effectivePosition(p, plot.points));
     const isActive = p.id === activeId;
     const isCloseTarget = p.id === currentFirstId && !plot.shapes[currentShapeId!]?.closed
       && (plot.shapes[currentShapeId!]?.pointIds.length ?? 0) >= 3;
@@ -730,13 +822,29 @@ function drawPoints(
       ctx.lineWidth = 1.5;
       ctx.stroke();
     }
-    ctx.beginPath();
-    ctx.arc(s.x, s.y, 5, 0, Math.PI * 2);
-    ctx.fillStyle = isActive ? '#3b5bdb' : '#ffffff';
-    ctx.fill();
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = '#0d1117';
-    ctx.stroke();
+    if (p.kind === 'onEdge') {
+      // Distinct glyph for constrained midpoints — a hollow diamond.
+      const r = 4.5;
+      ctx.beginPath();
+      ctx.moveTo(s.x, s.y - r);
+      ctx.lineTo(s.x + r, s.y);
+      ctx.lineTo(s.x, s.y + r);
+      ctx.lineTo(s.x - r, s.y);
+      ctx.closePath();
+      ctx.fillStyle = isActive ? '#3b5bdb' : '#ffffff';
+      ctx.fill();
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = '#0d1117';
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, 5, 0, Math.PI * 2);
+      ctx.fillStyle = isActive ? '#3b5bdb' : '#ffffff';
+      ctx.fill();
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = '#0d1117';
+      ctx.stroke();
+    }
   }
   ctx.restore();
 }

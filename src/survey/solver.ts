@@ -10,6 +10,19 @@ export interface SolverInput {
   anchorIndex: number;
   /** Index of the orientation point (its y is pinned to anchor's y). */
   orientationIndex: number;
+  /**
+   * Linear coordinate pins: each pin asserts
+   *   positions[targetIndex] = Σ weights[k] · positions[indices[k]]
+   * per axis. Used to pin on-edge points to (1-t)·A + t·B without
+   * adding new degrees of freedom. Emits two residuals (x and y) per
+   * pin with the supplied pin weight (default = PIN_WEIGHT).
+   */
+  linearPins?: Array<{
+    targetIndex: number;
+    indices: number[];
+    weights: number[];
+    pinWeight?: number;
+  }>;
 }
 
 export interface SolverResult {
@@ -52,8 +65,11 @@ export function solveLeastSquares(input: SolverInput): SolverResult {
 
   const measurements = input.measurements;
   const M = measurements.length;
-  // Residuals: M measurements + 2 anchor pins + 1 orientation pin.
-  const R = M + 3;
+  const linearPins = input.linearPins ?? [];
+  const LP = linearPins.length;
+  // Residuals: M measurements + 2 anchor pins + 1 orientation pin
+  //          + 2 residuals (x and y) per linear pin.
+  const R = M + 3 + 2 * LP;
 
   const residualsAt = (p: Float64Array): number[] => {
     const r = new Array<number>(R);
@@ -69,6 +85,20 @@ export function solveLeastSquares(input: SolverInput): SolverResult {
     r[M] = PIN_WEIGHT * (p[2 * ai] - anchorX0);
     r[M + 1] = PIN_WEIGHT * (p[2 * ai + 1] - anchorY0);
     r[M + 2] = PIN_WEIGHT * (p[2 * oi + 1] - p[2 * ai + 1]);
+    for (let q = 0; q < LP; q++) {
+      const pin = linearPins[q];
+      const pw = pin.pinWeight ?? PIN_WEIGHT;
+      let sumX = 0;
+      let sumY = 0;
+      for (let s = 0; s < pin.indices.length; s++) {
+        const w = pin.weights[s];
+        const idx = pin.indices[s];
+        sumX += w * p[2 * idx];
+        sumY += w * p[2 * idx + 1];
+      }
+      r[M + 3 + 2 * q] = pw * (p[2 * pin.targetIndex] - sumX);
+      r[M + 3 + 2 * q + 1] = pw * (p[2 * pin.targetIndex + 1] - sumY);
+    }
     return r;
   };
 
@@ -108,6 +138,22 @@ export function solveLeastSquares(input: SolverInput): SolverResult {
     rowO[2 * oi + 1] = PIN_WEIGHT;
     rowO[2 * ai + 1] = -PIN_WEIGHT;
     J.push(rowO);
+    for (let q = 0; q < LP; q++) {
+      const pin = linearPins[q];
+      const pw = pin.pinWeight ?? PIN_WEIGHT;
+      const rowX = new Array<number>(2 * N).fill(0);
+      const rowY = new Array<number>(2 * N).fill(0);
+      rowX[2 * pin.targetIndex] = pw;
+      rowY[2 * pin.targetIndex + 1] = pw;
+      for (let s = 0; s < pin.indices.length; s++) {
+        const w = pin.weights[s];
+        const idx = pin.indices[s];
+        rowX[2 * idx] = -pw * w;
+        rowY[2 * idx + 1] = -pw * w;
+      }
+      J.push(rowX);
+      J.push(rowY);
+    }
     return J;
   };
 

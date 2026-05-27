@@ -95,6 +95,11 @@ html, body, #root {
   font-variant-numeric: tabular-nums;
 }
 
+.header-buttons {
+  display: flex;
+  gap: 4px;
+}
+
 .header-button {
   background: #f4f6fb;
   color: #1a1f2b;
@@ -114,6 +119,25 @@ html, body, #root {
 .header-button:disabled {
   opacity: 0.45;
   cursor: default;
+}
+
+.slider-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.slider-row input[type="range"] {
+  flex: 1;
+  accent-color: #3b5bdb;
+}
+
+.slider-value {
+  font-size: 0.78rem;
+  color: #5a6478;
+  font-variant-numeric: tabular-nums;
+  min-width: 2.5ch;
+  text-align: right;
 }
 
 .unit-row {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type Plot, type Shape, emptyPlot } from './model/plot';
 import { ALL_UNITS, type Units } from './model/units';
 import { loadPlot, savePlot } from './model/persist';
+import { downloadPlot, pickPlotFile } from './model/io';
 import { SketchCanvas } from './sketch/SketchCanvas';
 import {
   bestNextCandidate,
@@ -10,7 +11,7 @@ import {
 import { runSurveySolve } from './survey/run';
 
 export type Layer = 'features' | 'survey';
-export type FeatureTool = 'draw' | 'point' | 'edit' | 'delete';
+export type FeatureTool = 'draw' | 'point' | 'onEdge' | 'edit' | 'delete';
 export type SurveyTool = 'measure' | 'delete';
 
 const HISTORY_LIMIT = 50;
@@ -67,6 +68,29 @@ export function App() {
     setPlot(prev => prev.units === u ? prev : { ...prev, units: u });
   }, []);
 
+  const setShapeCohesion = useCallback((v: number) => {
+    const clamped = Math.max(0, Math.min(1, v));
+    setPlot(prev => {
+      if (prev.shapeCohesion === clamped) return prev;
+      // Re-solve so the slider feels live when measurements exist.
+      const next = { ...prev, shapeCohesion: clamped };
+      return runSurveySolve(next) ?? next;
+    });
+  }, []);
+
+  const openFile = useCallback(async () => {
+    const loaded = await pickPlotFile();
+    if (!loaded) return;
+    pushHistory();
+    setPlot(loaded);
+    setCurrentShapeId(null);
+    setActivePointId(null);
+  }, [pushHistory]);
+
+  const saveFile = useCallback(() => {
+    downloadPlot(plotRef.current);
+  }, []);
+
   const candidates = useMemo(() => computeCandidates(plot), [plot]);
   const nextBest = useMemo(() => bestNextCandidate(candidates), [candidates]);
   const nextBestKey = nextBest?.key ?? null;
@@ -82,7 +106,7 @@ export function App() {
   const clearAll = () => {
     if (!confirm('Clear all points, shapes and measurements?')) return;
     pushHistory();
-    setPlot(p => ({ ...emptyPlot(), units: p.units }));
+    setPlot(p => ({ ...emptyPlot(), units: p.units, shapeCohesion: p.shapeCohesion }));
     setCurrentShapeId(null);
     setActivePointId(null);
   };
@@ -137,15 +161,23 @@ export function App() {
           <span>{measurementCount} meas</span>
           {layer === 'survey' && pointCount >= 2 ? <span>{remainingDof} dof left</span> : null}
         </div>
-        <button
-          type="button"
-          className="header-button"
-          onClick={undo}
-          disabled={history.length === 0}
-          title="Undo (Ctrl/Cmd+Z)"
-        >
-          ↶ Undo
-        </button>
+        <div className="header-buttons">
+          <button
+            type="button"
+            className="header-button"
+            onClick={undo}
+            disabled={history.length === 0}
+            title="Undo (Ctrl/Cmd+Z)"
+          >
+            ↶ Undo
+          </button>
+          <button type="button" className="header-button" onClick={openFile} title="Open a .fplot.json file">
+            Open
+          </button>
+          <button type="button" className="header-button" onClick={saveFile} title="Download as .fplot.json">
+            Save
+          </button>
+        </div>
       </header>
 
       <div className="app-body">
@@ -179,6 +211,8 @@ export function App() {
               nextBestLength={nextBest?.worldLength}
               units={plot.units}
               onUnitsChange={setUnits}
+              shapeCohesion={plot.shapeCohesion}
+              onShapeCohesionChange={setShapeCohesion}
               onSolve={solveNow}
               onClearMeasurements={clearMeasurements}
             />
@@ -229,11 +263,14 @@ function FeatureSidebar({
     <>
       <SectionTitle>Tools</SectionTitle>
       <div className="tool-grid">
-        <ToolButton active={tool === 'draw'} onClick={() => onTool('draw')} hint="Tap to chain points; tap the first point to close.">
+        <ToolButton active={tool === 'draw'} onClick={() => onTool('draw')} hint="Tap to chain points; tap an edge to insert a vertex; tap the first point to close.">
           Draw shape
         </ToolButton>
         <ToolButton active={tool === 'point'} onClick={() => onTool('point')} hint="Drop standalone reference points.">
           Add point
+        </ToolButton>
+        <ToolButton active={tool === 'onEdge'} onClick={() => onTool('onEdge')} hint="Tap an existing edge to drop a point pinned to that edge between its endpoints.">
+          On-edge point
         </ToolButton>
         <ToolButton active={tool === 'edit'} onClick={() => onTool('edit')} hint="Drag a point to move it.">
           Edit
@@ -289,6 +326,8 @@ function SurveySidebar({
   nextBestLength,
   units,
   onUnitsChange,
+  shapeCohesion,
+  onShapeCohesionChange,
   onSolve,
   onClearMeasurements,
 }: {
@@ -301,6 +340,8 @@ function SurveySidebar({
   nextBestLength?: number;
   units: Units;
   onUnitsChange: (u: Units) => void;
+  shapeCohesion: number;
+  onShapeCohesionChange: (v: number) => void;
   onSolve: () => void;
   onClearMeasurements: () => void;
 }) {
@@ -342,6 +383,24 @@ function SurveySidebar({
           <li>Next best length: <strong>~{nextBestLength.toFixed(0)} mm</strong></li>
         ) : null}
       </ul>
+
+      <SectionTitle>Shape cohesion</SectionTitle>
+      <div className="slider-row">
+        <input
+          type="range"
+          min={0}
+          max={1}
+          step={0.01}
+          value={shapeCohesion}
+          onChange={e => onShapeCohesionChange(Number(e.currentTarget.value))}
+          aria-label="Shape cohesion"
+        />
+        <span className="slider-value">{shapeCohesion.toFixed(2)}</span>
+      </div>
+      <p className="hint">
+        Pulls the survey back toward the rough sketch. 0 lets tape readings dominate;
+        higher values preserve the drawn shape when measurements are sparse.
+      </p>
 
       <button type="button" className="block-button" onClick={onSolve} disabled={measurementCount === 0}>
         Solve now

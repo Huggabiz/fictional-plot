@@ -1,4 +1,5 @@
 import type { Plot } from '../model/plot';
+import { effectivePosition } from '../model/plot';
 import { delaunayEdges } from './delaunay';
 import { rigidityRank } from './rigidity';
 
@@ -24,7 +25,7 @@ const edgeKey = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`);
 export function computeCandidates(plot: Plot): CandidateLine[] {
   const ids = Object.keys(plot.points);
   if (ids.length < 2) return [];
-  const positions = ids.map(id => plot.points[id].position);
+  const positions = ids.map(id => effectivePosition(plot.points[id], plot.points));
   const indexOf = new Map<string, number>();
   ids.forEach((id, k) => indexOf.set(id, k));
 
